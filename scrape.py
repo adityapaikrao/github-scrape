@@ -16,13 +16,12 @@ if __name__ == "__main__":
 
     # Authorise token
     auth = Auth.Token(token)
-    g = Github(auth=auth)
+    g = Github(auth=auth, per_page=100)
 
     repo = g.get_repo('tensorflow/tensorflow')
     print(repo.name)
 
     # scrape issues
-    issues_df = scrape_issues(repo)
-    issues_df.to_csv('test.csv', index=False)
+    scrape_issues(repo, g, num=80000)
 
     g.close()

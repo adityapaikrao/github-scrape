@@ -1,4 +1,8 @@
+import time
+import os
 import pandas as pd
+from github import GithubException
+
 
 def remove_quoted_comments(text):
     """
@@ -17,8 +21,8 @@ def process_comment(comment_list, issue_id, issue_creator, issue_assignees):
     comment_thread = ''
 
     for comment in comment_list:
-        if comment.user.login == 'google-ml-butler[bot]': # only comments feedback URLs, skip
-            continue
+        # if comment.user.login == 'google-ml-butler[bot]': # only comments feedback URLs, skip
+        #     continue
         
         # Add possibly helpful role of authors in the thread
         author = comment.user.login
@@ -47,8 +51,7 @@ def fetch_issue(issue):
     """
     Processes data for a single issue and returns it in a dictionary
     """
-    if issue.pull_request:
-        return None
+    issue_type = 'pull_request' if issue.pull_request else 'issue'
     
     assignee_list = [user.login for user in issue.assignees]
     comments, comment_thread = process_comment(issue.get_comments(), issue.id, issue.user.login, assignee_list)
@@ -56,8 +59,9 @@ def fetch_issue(issue):
     
     return  {
             "id": issue.id,
-            "type": "issue",
+            "type": issue_type,
             "title": issue.title,
+            "body": issue.body,
             "author": issue.user.login,
             # "assignees":issue.assignees,
             "created_at": issue.created_at,
@@ -67,17 +71,85 @@ def fetch_issue(issue):
             "comments_list": comments,
             "comment_thread":comment_thread
         }
-
-def scrape_issues(repo, num=100, state='closed'):
+def load_progress():
     """
-    Scrapes closed Issues from the given repository and returns data in a DataFrame
+    Load progress from previosuly saved files to resume from
+    """
+
+    page_num = 0
+    os.makedirs("./data", exist_ok=True)  # Ensure the directory exists
+    
+    if os.path.exists("./data/last_page.txt"):
+        with open("./data/last_page.txt", "r") as f:
+            page_num = int(f.read().strip())
+
+    print(f'Loading progress, starting from page {page_num}')
+    return page_num
+
+
+def save_progress(new_issues, new_pull_requests, page_num):
+    """
+    Saves the data fetched after processing every page and updates the page number to resume from in case of failure
+    """
+    os.makedirs('./data', exist_ok=True)
+
+    if new_issues:
+        df_issues = pd.DataFrame(new_issues)
+        file_exists = os.path.exists('./data/scraped_issues.csv')
+        df_issues.to_csv('./data/scraped_issues.csv', mode='a', header= (not file_exists), index=False)
+    
+    if new_pull_requests:
+        df_pull_requests = pd.DataFrame(new_pull_requests)
+        file_exists = os.path.exists('./data/scraped_pull_requests.csv')
+        df_pull_requests.to_csv('./data/scraped_pull_requests.csv', mode='a', header= (not file_exists), index=False)
+    
+    with open('./data/last_page.txt', 'w') as f: # update the page to resume from
+        f.write(str(page_num))
+
+    print(f'Progress has been saved so far...resuming from page {page_num}')
+
+
+def scrape_issues(repo, g, num=100, state='closed'):
+    """
+    Scrapes closed Issues from the given repository and stores data in a DataFrame
     """
     
-    issues = []
-    for issue in repo.get_issues(state=state)[:num]:
-        result = fetch_issue(issue)
-        if result:
-            issues.append(result)
+    page_num = load_progress() # load previous progress
+    count = page_num * 100 # per page is 100 so total fetched till now would 0*100, 1 * 100 etc.
 
-    df = pd.DataFrame(issues)
-    return df
+    while count < num:
+        try:
+            issue_page = repo.get_issues(state=state).get_page(page_num)
+            if not issue_page:
+                return
+            new_issues = []
+            new_pull_requests = []
+
+            for issue in issue_page:
+                if count >= num:
+                    break
+                result = fetch_issue(issue)
+                if result['type'] == 'pull_request':
+                    new_pull_requests.append(result)
+                else:
+                    new_issues.append(result)
+                
+                count += 1
+            page_num += 1
+            save_progress(new_issues, new_pull_requests, page_num)
+
+        except GithubException as e:
+            print(f'Encountered Github Exception {e.status} {e.message} {e.headers}')
+            save_progress([], [], page_num)
+            if e.status == 403 and g is not None:
+                reset_time = g.rate_limiting_resettime
+                wait_time = max(reset_time - time.time(), 60*10)
+                print(f'Rate limit reached...Sleeping for {wait_time} seconds')
+                time.sleep(wait_time) # sleep for a minimum of 10 minutes
+                continue
+            else:
+                print('Some other error...')
+                raise e # some other error
+
+
+    return 

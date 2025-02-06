@@ -1,5 +1,5 @@
 # github-scrape
-Python Script tp scrape Issues &amp; PRs from a github repo using github API via `PyGithub` library. Requires Python 3.x
+Python Script to scrape Issues &amp; PRs from a github repo using github API via `PyGithub` library. Requires Python 3.x
 
 ## Features
 1.Fetches closed issues from the TensorFlow repository.
@@ -21,5 +21,5 @@ copy your github PAT into ```credential_secret.py``` or pass as an argument whil
 
 **Running the Script**
 ```
-python scraper.py --repo=<your repository> --pat=<your github PAT>
+python scrape.py --repo=<your repository> --pat=<your github PAT>
 ```
